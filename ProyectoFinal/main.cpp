@@ -40,6 +40,7 @@
 #include "Bosque.h"
 #include "Sendero.h"
 #include "Iluminacion.h"
+#include "Campana.h"
 
 // Prototipos
 void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode);
@@ -65,10 +66,14 @@ bool mouseCapturado = false;
 FichasCulturales fichas;
 bool firstMouse = true;
 
-// Plano lejano de la proyección (el escenario mide ~130 m)
+// Campana del atrio
+Campana campana;
+const glm::vec3 POS_CAMPANARIO(-38.0f, 0.0f, -4.0f);
+
+// Plano lejano de la proyección
 const float PLANO_LEJANO = 200.0f;
 
-// Vértices del cubo (se usa para los postes de los faroles)
+// Vértices del cubo (postes de los faroles)
 float vertices[] = {
 	 -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
 		0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
@@ -206,10 +211,34 @@ float skelLegAngle = 0.0f;
 float skelForearmAngle = 0.0f;
 float skelKneeAngle = 0.0f;
 
+// Fantasma
+bool  fantasmaActivo = true;          // tecla G
+float tiempoFantasma = 0.0f;
+float fantasmaYaw = 0.0f;
+const glm::vec3 COLOR_FANTASMA(0.55f, 0.85f, 1.0f);
+const float VEL_FANTASMA = 2.5f;
+const float ALTURA_FLOTE = 0.6f;
+const float PROFUNDIDAD_TUMBA = -2.2f;
+
+// Tumba de donde sale el fantasma (frente a la lápida 3)
+const glm::vec3 POS_TUMBA_FANTASMA(27.14f, 0.0f, -6.5f);
+
+// Ruta del fantasma (se llena en main)
+std::vector<glm::vec3> rutaFantasma;
+
+struct EstadoFantasma {
+	glm::vec3 pos;
+	float yaw;
+	float inclinacion;
+	float alpha;        // 0 invisible, 1 visible
+	float brazos;       // 0 abajo, 1 al frente
+};
+EstadoFantasma estadoFantasma = { POS_TUMBA_FANTASMA, 0.0f, 0.0f, 0.0f, 0.0f };
+
 // Salto
 float velocidadSalto = 0.0f;
 bool enSuelo = true;
-const float FUERZA_SALTO = 5.0f;   // ~85 cm de alto
+const float FUERZA_SALTO = 5.0f;
 const float GRAVEDAD = 15.0f;
 
 // Mariposas
@@ -247,11 +276,11 @@ std::vector<BoundingBox> invisibleWalls = {
 	{  -23.3f, -16.7f,  -1.25f,  3.1f }	// ofrenda
 };
 
-// Hueco del portón del panteón: solo bloquea cuando el portón está cerrado
+// Hueco del portón (solo bloquea si está cerrado)
 const BoundingBox HUECO_PORTON = { 30.35f, 34.4f, 49.90f, 50.00f };
-const float ANGULO_PASO_PORTON = 60.0f;   // a partir de este ángulo ya se puede pasar
+const float ANGULO_PASO_PORTON = 60.0f;
 
-// Revisa si un círculo de radio r en pos toca una caja
+// Colisión círculo contra caja
 bool TocaCaja(const glm::vec3& pos, const BoundingBox& caja, float r)
 {
 	return pos.x + r >= caja.minX && pos.x - r <= caja.maxX &&
@@ -269,8 +298,7 @@ bool CheckCollision(glm::vec3 pos)
 			return true;
 	}
 
-	// Portón cerrado. Si el esqueleto ya estaba en el hueco cuando se cerró,
-	// se le deja salir para que no se quede atorado.
+	// Portón cerrado (si ya estaba dentro del hueco lo deja salir)
 	if (anguloPorton < ANGULO_PASO_PORTON &&
 		TocaCaja(pos, HUECO_PORTON, skeletonRadius) &&
 		!TocaCaja(skeletonPos, HUECO_PORTON, skeletonRadius))
@@ -278,6 +306,141 @@ bool CheckCollision(glm::vec3 pos)
 		return true;
 	}
 	return false;
+}
+
+// Funciones del fantasma
+
+// Suavizado (smoothstep)
+float Suavizar(float x)
+{
+	x = glm::clamp(x, 0.0f, 1.0f);
+	return x * x * (3.0f - 2.0f * x);
+}
+
+// Ángulo en Y hacia una dirección
+float YawDe(const glm::vec3& d)
+{
+	return glm::degrees(atan2(d.x, d.z));
+}
+
+float LongitudRuta()
+{
+	float L = 0.0f;
+	for (size_t i = 0; i + 1 < rutaFantasma.size(); i++)
+		L += glm::length(rutaFantasma[i + 1] - rutaFantasma[i]);
+	return L;
+}
+
+// Punto a distancia d sobre la ruta y dirección del tramo
+glm::vec3 PuntoEnRuta(float d, glm::vec3& dir)
+{
+	for (size_t i = 0; i + 1 < rutaFantasma.size(); i++)
+	{
+		glm::vec3 seg = rutaFantasma[i + 1] - rutaFantasma[i];
+		float l = glm::length(seg);
+		if (d <= l || i + 2 == rutaFantasma.size())
+		{
+			dir = seg / l;
+			return rutaFantasma[i] + dir * glm::clamp(d, 0.0f, l);
+		}
+		d -= l;
+	}
+	dir = glm::vec3(0.0f, 0.0f, 1.0f);
+	return rutaFantasma.empty() ? POS_TUMBA_FANTASMA : rutaFantasma[0];
+}
+
+// Ciclo del fantasma: sale, va al altar, regresa y se hunde
+EstadoFantasma AnimarFantasma(float t)
+{
+	EstadoFantasma e = { POS_TUMBA_FANTASMA, 0.0f, 0.0f, 0.0f, 0.0f };
+	if (rutaFantasma.size() < 2) return e;
+
+	const float tSubir = 3.0f, tAltar = 5.0f, tBajar = 3.0f, tEspera = 3.0f;
+	const float L = LongitudRuta();
+	const float tViaje = L / VEL_FANTASMA;
+	const float total = tSubir + tViaje + tAltar + tViaje + tBajar + tEspera;
+
+	float c = fmod(t, total);
+	float flote = 0.12f * sin(t * 2.5f);
+
+	glm::vec3 inicio = rutaFantasma.front();
+	glm::vec3 fin = rutaFantasma.back();
+	glm::vec3 dir;
+	PuntoEnRuta(0.0f, dir);
+	glm::vec3 dirSalida = dir;
+
+	// 1. Sale de la tumba
+	if (c < tSubir)
+	{
+		float k = Suavizar(c / tSubir);
+		e.pos = inicio;
+		e.pos.y = alturaPiso(inicio.x, inicio.z) + glm::mix(PROFUNDIDAD_TUMBA, ALTURA_FLOTE, k);
+		e.yaw = YawDe(dirSalida);
+		e.alpha = k;
+		e.brazos = k;
+		return e;
+	}
+	c -= tSubir;
+
+	// 2. Va al altar
+	if (c < tViaje)
+	{
+		float d = L * Suavizar(c / tViaje);
+		e.pos = PuntoEnRuta(d, dir);
+		e.pos.y = alturaPiso(e.pos.x, e.pos.z) + ALTURA_FLOTE + flote;
+		e.yaw = YawDe(dir);
+		e.inclinacion = 12.0f;
+		e.alpha = 1.0f;
+		e.brazos = 1.0f;
+		return e;
+	}
+	c -= tViaje;
+
+	// 3. Frente al altar
+	if (c < tAltar)
+	{
+		float k = c / tAltar;
+		e.pos = fin;
+		e.pos.y = alturaPiso(fin.x, fin.z) + ALTURA_FLOTE + flote;
+		e.yaw = YawDe(glm::vec3(posAltar.x, 0.0f, posAltar.z) - glm::vec3(fin.x, 0.0f, fin.z));
+		e.inclinacion = 6.0f;
+		e.alpha = 1.0f;
+		e.brazos = 1.0f + 0.35f * sin(k * 3.14159265f);
+		return e;
+	}
+	c -= tAltar;
+
+	// 4. Regresa a la tumba
+	if (c < tViaje)
+	{
+		float d = L * (1.0f - Suavizar(c / tViaje));
+		e.pos = PuntoEnRuta(d, dir);
+		e.pos.y = alturaPiso(e.pos.x, e.pos.z) + ALTURA_FLOTE + flote;
+		e.yaw = YawDe(-dir);
+		e.inclinacion = 12.0f;
+		e.alpha = 1.0f;
+		e.brazos = 1.0f;
+		return e;
+	}
+	c -= tViaje;
+
+	// 5. Se hunde en la tumba
+	if (c < tBajar)
+	{
+		float k = Suavizar(c / tBajar);
+		e.pos = inicio;
+		e.pos.y = alturaPiso(inicio.x, inicio.z) + glm::mix(ALTURA_FLOTE, PROFUNDIDAD_TUMBA, k);
+		e.yaw = YawDe(-dirSalida);
+		e.alpha = 1.0f - k;
+		e.brazos = 1.0f - k;
+		return e;
+	}
+
+	// 6. Espera escondido
+	e.pos = inicio;
+	e.pos.y = alturaPiso(inicio.x, inicio.z) + PROFUNDIDAD_TUMBA;
+	e.yaw = YawDe(dirSalida);
+	return e;
 }
 
 int main()
@@ -317,6 +480,7 @@ int main()
 	Shader lightingShader("Shader/lighting.vs", "Shader/lighting.frag");
 	Shader SkyBoxshader("Shader/skybox.vs", "Shader/skybox.frag");
 	Shader humoShader("Shader/humo.vs", "Shader/humo.frag");
+	Shader fantasmaShader("Shader/fantasma.vs", "Shader/fantasma.frag");
 
 	// Carga de modelos: esqueleto
 	Model skeleton((char*)"assets/models/skeleton/skeleton.obj");
@@ -334,6 +498,71 @@ int main()
 	Model pieIzq((char*)"assets/models/skeleton/pieIzq.obj");
 	Model piernaDer((char*)"assets/models/skeleton/piernaDer.obj");
 	Model piernaIzq((char*)"assets/models/skeleton/piernaIzq.obj");
+
+	// Dibujo del esqueleto por partes (jugador y fantasma)
+	auto dibujarEsqueleto = [&](Shader& sh, const glm::mat4& base,
+		float brazoD, float brazoI, float anteD, float anteI,
+		float piernaD, float piernaI, float rodD, float rodI)
+		{
+			GLint loc = glGetUniformLocation(sh.Program, "model");
+
+			auto dibujar = [&](Model& m, const glm::mat4& mat)
+				{
+					glUniformMatrix4fv(loc, 1, GL_FALSE, glm::value_ptr(mat));
+					m.Draw(sh);
+				};
+			auto articular = [](glm::mat4 m, const glm::vec3& pivote, float angulo)
+				{
+					m = glm::translate(m, pivote);
+					m = glm::rotate(m, glm::radians(angulo), glm::vec3(1.0f, 0.0f, 0.0f));
+					return glm::translate(m, -pivote);
+				};
+
+			// Articulaciones
+			const glm::vec3 hombroDer(-0.28f, 1.30f, 0.0f);
+			const glm::vec3 codoDer(-0.286f, 1.00f, -0.02f);
+			const glm::vec3 hombroIzq(0.28f, 1.30f, 0.0f);
+			const glm::vec3 codoIzq(0.286f, 1.00f, -0.02f);
+			const glm::vec3 caderaDer(-0.10f, 0.90f, 0.0f);
+			const glm::vec3 rodillaDer(-0.10f, 0.54f, -0.02f);
+			const glm::vec3 caderaIzq(0.10f, 0.90f, 0.0f);
+			const glm::vec3 rodillaIzq(0.10f, 0.54f, -0.02f);
+
+			// Pecho y cráneo
+			dibujar(pecho, base);
+			dibujar(craneo, base);
+
+			// Brazo derecho
+			glm::mat4 bD = articular(base, hombroDer, brazoD);
+			dibujar(brazoDer, bD);
+			glm::mat4 aD = articular(bD, codoDer, anteD);
+			dibujar(antebrazoDer, aD);
+			dibujar(manoDer, aD);
+
+			// Brazo izquierdo
+			glm::mat4 bI = articular(base, hombroIzq, brazoI);
+			dibujar(brazoIzq, bI);
+			glm::mat4 aI = articular(bI, codoIzq, anteI);
+			dibujar(antebrazoIzq, aI);
+			dibujar(manoIzq, aI);
+
+			// Pierna derecha
+			glm::mat4 pD = articular(base, caderaDer, piernaD);
+			dibujar(femurDer, pD);
+			glm::mat4 rD = articular(pD, rodillaDer, rodD);
+			dibujar(piernaDer, rD);
+			dibujar(pieDer, rD);
+
+			// Pierna izquierda
+			glm::mat4 pI = articular(base, caderaIzq, piernaI);
+			dibujar(femurIzq, pI);
+			glm::mat4 rI = articular(pI, rodillaIzq, rodI);
+			dibujar(piernaIzq, rI);
+			dibujar(pieIzq, rI);
+
+			// Cuerpo
+			dibujar(skeleton, base);
+		};
 
 	// Carga de modelos: escenario
 	Model arcoEntrada((char*)"assets/models/edificacion/atrio_arco_entrada.obj");
@@ -427,6 +656,15 @@ int main()
 	// Sendero
 	construirSendero();
 
+	// Ruta del fantasma
+	rutaFantasma = {
+		POS_TUMBA_FANTASMA,
+		glm::vec3(20.0f, 0.0f, 0.0f),
+		glm::vec3(5.0f, 0.0f, 0.0f),
+		glm::vec3(-12.0f, 0.0f, 6.0f),
+		glm::vec3(posAltar.x, 0.0f, altarZ1 + 1.5f)
+	};
+
 	// Fichas culturales
 	fichas.cargar("Imagenes");
 	fichas.agregarPunto("Ofrenda", glm::vec3(posAltar.x, 0.0f, altarZ1 + 3.0f), 3.5f, {
@@ -440,9 +678,14 @@ int main()
 	for (const Farol& f : faroles)
 		invisibleWalls.push_back({ f.pos.x - 0.25f, f.pos.x + 0.25f, f.pos.z - 0.25f, f.pos.z + 0.25f });
 
-	// Colisión de las tumbas (montículo de tierra con su lápida o cruz)
+	// Colisión de las tumbas
 	for (const Tumba& t : tumbas)
 		invisibleWalls.push_back({ t.x0, t.x1, t.z0, t.z1 });
+
+	// Campana y colisión del campanario
+	campana.inicializar(POS_CAMPANARIO);
+	for (const glm::vec4& c : campana.cajasColision())
+		invisibleWalls.push_back({ c.x, c.y, c.z, c.w });
 
 	// Cubo
 	GLuint VBO, VAO;
@@ -493,8 +736,7 @@ int main()
 	// Iluminación de noche
 	GLuint mapaLuzVelas = configurarNoche(lightingShader.Program);
 
-	// El shader tiene una luz puntual que no se usa: se deja apagada.
-	// constant = 1 evita dividir entre cero en la atenuación.
+	// Luz puntual apagada
 	glUniform3f(glGetUniformLocation(lightingShader.Program, "pointLights[0].position"), 0.0f, 0.0f, 0.0f);
 	glUniform3f(glGetUniformLocation(lightingShader.Program, "pointLights[0].ambient"), 0.0f, 0.0f, 0.0f);
 	glUniform3f(glGetUniformLocation(lightingShader.Program, "pointLights[0].diffuse"), 0.0f, 0.0f, 0.0f);
@@ -685,6 +927,10 @@ int main()
 		// Faroles
 		dibujarFaroles(lightingShader, modelLoc, VAO, farol);
 
+		// Campana
+		campana.actualizar(deltaTime, skeletonPos);
+		campana.dibujar(lightingShader, modelLoc, VAO);
+
 		// Papel picado
 		papelPicado.dibujar(lightingShader, currentFrame);
 
@@ -695,109 +941,16 @@ int main()
 			mariposas[i]->Dibujar(lightingShader);
 		}
 
-		// Esqueleto
+		// Esqueleto del jugador
 		model = glm::mat4(1.0f);
 		model = glm::translate(model, skeletonPos);
 		model = glm::rotate(model, glm::radians(skeletonYaw), glm::vec3(0.0f, 1.0f, 0.0f));
-		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
 		glUniform1i(glGetUniformLocation(lightingShader.Program, "transparency"), 0);
-
-		modelTemp = model;
-
-		// Pecho
-		pecho.Draw(lightingShader);
-
-		// Cráneo
-		model = modelTemp;
-		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-		craneo.Draw(lightingShader);
-
-		// Articulaciones
-		const glm::vec3 hombroDer(-0.28f, 1.30f, 0.0f);
-		const glm::vec3 codoDer(-0.286f, 1.00f, -0.02f);
-		const glm::vec3 hombroIzq(0.28f, 1.30f, 0.0f);
-		const glm::vec3 codoIzq(0.286f, 1.00f, -0.02f);
-		const glm::vec3 caderaDer(-0.10f, 0.90f, 0.0f);
-		const glm::vec3 rodillaDer(-0.10f, 0.54f, -0.02f);
-		const glm::vec3 caderaIzq(0.10f, 0.90f, 0.0f);
-		const glm::vec3 rodillaIzq(0.10f, 0.54f, -0.02f);
-
-		// Brazo derecho
-		glm::mat4 brazoDerModel = modelTemp;
-		brazoDerModel = glm::translate(brazoDerModel, hombroDer);
-		brazoDerModel = glm::rotate(brazoDerModel, glm::radians(skelArmAngle), glm::vec3(1.0f, 0.0f, 0.0f));
-		brazoDerModel = glm::translate(brazoDerModel, -hombroDer);
-		model = brazoDerModel;
-		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-		brazoDer.Draw(lightingShader);
-
-		// Antebrazo derecho
-		model = brazoDerModel;
-		model = glm::translate(model, codoDer);
-		model = glm::rotate(model, glm::radians(skelForearmAngle), glm::vec3(1.0f, 0.0f, 0.0f));
-		model = glm::translate(model, -codoDer);
-		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-		antebrazoDer.Draw(lightingShader);
-		manoDer.Draw(lightingShader);
-
-		// Brazo izquierdo
-		glm::mat4 brazoIzqModel = modelTemp;
-		brazoIzqModel = glm::translate(brazoIzqModel, hombroIzq);
-		brazoIzqModel = glm::rotate(brazoIzqModel, glm::radians(-skelArmAngle), glm::vec3(1.0f, 0.0f, 0.0f));
-		brazoIzqModel = glm::translate(brazoIzqModel, -hombroIzq);
-		model = brazoIzqModel;
-		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-		brazoIzq.Draw(lightingShader);
-
-		// Antebrazo izquierdo
-		model = brazoIzqModel;
-		model = glm::translate(model, codoIzq);
-		model = glm::rotate(model, glm::radians(-skelForearmAngle), glm::vec3(1.0f, 0.0f, 0.0f));
-		model = glm::translate(model, -codoIzq);
-		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-		antebrazoIzq.Draw(lightingShader);
-		manoIzq.Draw(lightingShader);
-
-		// Pierna derecha
-		glm::mat4 piernaDerModel = modelTemp;
-		piernaDerModel = glm::translate(piernaDerModel, caderaDer);
-		piernaDerModel = glm::rotate(piernaDerModel, glm::radians(-skelLegAngle), glm::vec3(1.0f, 0.0f, 0.0f));
-		piernaDerModel = glm::translate(piernaDerModel, -caderaDer);
-		model = piernaDerModel;
-		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-		femurDer.Draw(lightingShader);
-
-		// Rodilla derecha
-		model = piernaDerModel;
-		model = glm::translate(model, rodillaDer);
-		model = glm::rotate(model, glm::radians(skelKneeAngle), glm::vec3(1.0f, 0.0f, 0.0f));
-		model = glm::translate(model, -rodillaDer);
-		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-		piernaDer.Draw(lightingShader);
-		pieDer.Draw(lightingShader);
-
-		// Pierna izquierda
-		glm::mat4 piernaIzqModel = modelTemp;
-		piernaIzqModel = glm::translate(piernaIzqModel, caderaIzq);
-		piernaIzqModel = glm::rotate(piernaIzqModel, glm::radians(skelLegAngle), glm::vec3(1.0f, 0.0f, 0.0f));
-		piernaIzqModel = glm::translate(piernaIzqModel, -caderaIzq);
-		model = piernaIzqModel;
-		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-		femurIzq.Draw(lightingShader);
-
-		// Rodilla izquierda
-		model = piernaIzqModel;
-		model = glm::translate(model, rodillaIzq);
-		model = glm::rotate(model, glm::radians(-skelKneeAngle), glm::vec3(1.0f, 0.0f, 0.0f));
-		model = glm::translate(model, -rodillaIzq);
-		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-		piernaIzq.Draw(lightingShader);
-		pieIzq.Draw(lightingShader);
-
-		// Cuerpo del esqueleto
-		model = modelTemp;
-		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-		skeleton.Draw(lightingShader);
+		dibujarEsqueleto(lightingShader, model,
+			skelArmAngle, -skelArmAngle,          // brazos
+			skelForearmAngle, -skelForearmAngle,  // antebrazos
+			-skelLegAngle, skelLegAngle,          // piernas
+			skelKneeAngle, -skelKneeAngle);       // rodillas
 
 		// Skybox
 		glDepthFunc(GL_LEQUAL);
@@ -811,6 +964,46 @@ int main()
 		glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
 		glBindVertexArray(0);
 		glDepthFunc(GL_LESS);
+
+		// Fantasma
+		if (fantasmaActivo && estadoFantasma.alpha > 0.01f)
+		{
+			fantasmaShader.Use();
+			GLuint fp = fantasmaShader.Program;
+			glUniformMatrix4fv(glGetUniformLocation(fp, "view"), 1, GL_FALSE, glm::value_ptr(view));
+			glUniformMatrix4fv(glGetUniformLocation(fp, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+			glUniform3fv(glGetUniformLocation(fp, "viewPos"), 1, glm::value_ptr(camera.GetPosition()));
+			glUniform3fv(glGetUniformLocation(fp, "colorFantasma"), 1, glm::value_ptr(COLOR_FANTASMA));
+			glUniform1f(glGetUniformLocation(fp, "alphaFantasma"), estadoFantasma.alpha);
+			glUniform1f(glGetUniformLocation(fp, "tiempo"), currentFrame);
+			glUniform3f(glGetUniformLocation(fp, "colorNiebla"), NIEBLA_COLOR.x, NIEBLA_COLOR.y, NIEBLA_COLOR.z);
+			glUniform1f(glGetUniformLocation(fp, "densidadNiebla"), NIEBLA_DENSIDAD);
+			glUniform1i(glGetUniformLocation(fp, "texture_diffuse1"), 0);
+
+			// Blending aditivo
+			glEnable(GL_BLEND);
+			glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+			glDepthMask(GL_FALSE);
+
+			glm::mat4 baseFantasma = glm::mat4(1.0f);
+			baseFantasma = glm::translate(baseFantasma, estadoFantasma.pos);
+			baseFantasma = glm::rotate(baseFantasma, glm::radians(fantasmaYaw), glm::vec3(0.0f, 1.0f, 0.0f));
+			baseFantasma = glm::rotate(baseFantasma, glm::radians(estadoFantasma.inclinacion), glm::vec3(1.0f, 0.0f, 0.0f));
+
+			// Pose del fantasma
+			float b = estadoFantasma.brazos;
+			float vaiven = sin(currentFrame * 2.0f) * 6.0f;
+			float colgar = sin(currentFrame * 1.5f) * 4.0f;
+			dibujarEsqueleto(fantasmaShader, baseFantasma,
+				-75.0f * b + vaiven, -75.0f * b - vaiven,  // brazos
+				-20.0f * b, -20.0f * b,                    // antebrazos
+				15.0f + colgar, 10.0f - colgar,            // piernas
+				25.0f, 30.0f);                             // rodillas
+
+			glDepthMask(GL_TRUE);
+			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			glDisable(GL_BLEND);
+		}
 
 		// Llamas de velas y faroles
 		lightingShader.Use();
@@ -955,6 +1148,18 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode
 		abrirPorton = !abrirPorton;
 	}
 
+	// Campana: empezar o dejar de doblar
+	if (key == GLFW_KEY_C && action == GLFW_PRESS)
+	{
+		campana.alternarDoblar();
+	}
+
+	// Fantasma: mostrar u ocultar
+	if (key == GLFW_KEY_G && action == GLFW_PRESS)
+	{
+		fantasmaActivo = !fantasmaActivo;
+	}
+
 	// Mariposas: detener o reanudar el vuelo
 	if (key == GLFW_KEY_M && action == GLFW_PRESS)
 	{
@@ -995,6 +1200,19 @@ void Animation()
 			velocidadSalto = 0.0f;
 			enSuelo = true;
 		}
+	}
+
+	// Fantasma
+	if (fantasmaActivo)
+	{
+		tiempoFantasma += deltaTime;
+		estadoFantasma = AnimarFantasma(tiempoFantasma);
+
+		// Giro suave
+		float diffF = estadoFantasma.yaw - fantasmaYaw;
+		while (diffF < -180.0f) diffF += 360.0f;
+		while (diffF > 180.0f) diffF -= 360.0f;
+		fantasmaYaw += diffF * glm::min(1.0f, 4.0f * deltaTime);
 	}
 
 	// Portón
