@@ -61,7 +61,7 @@ uniform Material material;
 uniform int transparency;
 
 // Luz de las velas
-// Mapa de luz: textura vista desde arriba con la luz de todas las velas (se calcula en main.cpp)
+// Mapa de luz de las velas visto desde arriba
 uniform sampler2D mapaVelas;   // unidad de textura 5
 uniform vec2  mapaMin;   // esquina (x, z) del mapa
 uniform float mapaTam;   // metros que cubre el mapa
@@ -256,4 +256,4 @@ vec3 CalcSpotLight( SpotLight light, vec3 normal, vec3 fragPos, vec3 viewDir )
     specular *= attenuation * intensity;
     
     return ( ambient + diffuse + specular );
-}
+}

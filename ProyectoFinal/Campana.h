@@ -1,7 +1,6 @@
 ﻿#pragma once
 
-// =============================================================
-//  Campana.h  -  Campana del atrio que dobla por los difuntos
+// Campana del atrio que dobla por los difuntos
 //
 //  En la noche de muertos las campanas de la iglesia "doblan"
 //  para llamar a las ánimas. Esta clase modela:
@@ -31,7 +30,6 @@
 //  como superficie de revolución de un perfil 2D.
 //  La integración usa Euler semi-implícito con pasos fijos de
 //  1/240 s para que sea estable aunque cambien los FPS.
-// =============================================================
 
 // Librerías
 #include <windows.h>
@@ -54,7 +52,7 @@ class Campana
 {
 public:
 
-	// ---------------- Parámetros físicos ----------------
+	// Parámetros físicos
 	float gravedad = 9.81f;
 	float largoCampana = 0.90f;          // longitud equivalente del péndulo físico (m)
 	float largoBadajo = 0.72f;           // más corto: oscila más rápido y se desfasa
@@ -65,7 +63,7 @@ public:
 	float restitucion = 0.35f;           // e  del choque badajo-campana
 	float anguloContacto = 0.34f;        // ángulo relativo en el que el badajo toca la pared (rad)
 
-	// ---------------- Colores ----------------
+	// Colores
 	glm::vec3 colorBronce = glm::vec3(0.55f, 0.38f, 0.16f);
 	glm::vec3 colorBadajo = glm::vec3(0.18f, 0.16f, 0.14f);
 	glm::vec3 colorMadera = glm::vec3(0.30f, 0.18f, 0.09f);
@@ -138,7 +136,7 @@ public:
 		glUniform1i(glGetUniformLocation(P, "transparency"), 0);
 		glUniform1i(locUsarColor, 1);
 
-		// ---- Campanario de madera (cubo unitario escalado) ----
+		// Campanario de madera (cubo unitario escalado)
 		glUniform3fv(locColor, 1, glm::value_ptr(colorMadera));
 		glBindVertexArray(cuboVAO);
 		for (int lado = -1; lado <= 1; lado += 2)
@@ -168,7 +166,7 @@ public:
 			dibujarCubo(modelLoc, glm::vec3(base.x, 0.15f, z), glm::vec3(0.5f, 0.3f, 0.5f));
 		}
 
-		// ---- Yugo: gira junto con la campana ----
+		// Yugo: gira junto con la campana
 		glm::mat4 giroCampana = glm::translate(glm::mat4(1.0f), pivote);
 		giroCampana = glm::rotate(giroCampana, theta, glm::vec3(0.0f, 0.0f, 1.0f));
 
@@ -179,12 +177,12 @@ public:
 		glDrawArrays(GL_TRIANGLES, 0, 36);
 		glBindVertexArray(0);
 
-		// ---- Campana ----
+		// Campana
 		glUniform3fv(locColor, 1, glm::value_ptr(colorBronce));
 		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(giroCampana));
 		mallaCampana->Draw(shader);
 
-		// ---- Badajo: gira con su propio ángulo phi ----
+		// Badajo: gira con su propio ángulo phi
 		glm::mat4 giroBadajo = glm::translate(glm::mat4(1.0f), pivote);
 		giroBadajo = glm::rotate(giroBadajo, phi, glm::vec3(0.0f, 0.0f, 1.0f));
 		glUniform3fv(locColor, 1, glm::value_ptr(colorBadajo));
@@ -196,13 +194,13 @@ public:
 
 private:
 
-	// ---------------- Medidas del campanario ----------------
+	// Medidas del campanario
 	const float ALTURA_VIGA = 4.2f;          // altura de la viga superior (m)
 	const float ALTURA_EJE = 4.0f;           // altura del eje de giro (m)
 	const float SEPARACION_POSTES = 1.2f;    // mitad de la distancia entre postes (m)
 	const float PASO = 1.0f / 240.0f;        // paso fijo de integración (s)
 
-	// ---------------- Estado ----------------
+	// Estado
 	glm::vec3 base = glm::vec3(0.0f);
 	glm::vec3 pivote = glm::vec3(0.0f);
 	float theta = 0.0f, omega = 0.0f;        // campana: ángulo y velocidad angular
@@ -214,7 +212,7 @@ private:
 	Mesh* mallaCampana = nullptr;
 	Mesh* mallaBadajo = nullptr;
 
-	// ---------------- Sonido ----------------
+	// Sonido
 	static const int FRECUENCIA_MUESTREO = 22050;
 	static const int MUESTRAS = 22050 * 3;           // 3 s de sonido
 	std::vector<float> ondaBase;                     // sonido normalizado (-1..1)
@@ -224,7 +222,7 @@ private:
 	// Un paso de la simulación
 	void paso(float h, glm::vec3 posJugador)
 	{
-		// --- Campana: control por energía + péndulo amortiguado ---
+		// Campana: control por energía + péndulo amortiguado
 		float w2 = gravedad / largoCampana;
 		float energia = 0.5f * omega * omega + w2 * (1.0f - std::cos(theta));
 		float energiaObjetivo = w2 * (1.0f - std::cos(amplitudObjetivo));
@@ -237,13 +235,13 @@ private:
 		omega += alfa * h;                 // Euler semi-implícito: primero velocidad,
 		theta += omega * h;                // luego posición con la velocidad nueva
 
-		// --- Badajo: péndulo libre más corto ---
+		// Badajo: péndulo libre más corto
 		float w2b = gravedad / largoBadajo;
 		float alfaB = -w2b * std::sin(phi) - amortBadajo * omegaB;
 		omegaB += alfaB * h;
 		phi += omegaB * h;
 
-		// --- Choque contra la pared interior ---
+		// Choque contra la pared interior
 		float relativo = phi - theta;
 		if (std::fabs(relativo) > anguloContacto)
 		{
@@ -264,8 +262,7 @@ private:
 		}
 	}
 
-	// ---------------- Geometría ----------------
-
+	// Geometría
 	// Dibuja el cubo unitario escalado y trasladado
 	void dibujarCubo(GLint modelLoc, glm::vec3 centro, glm::vec3 escala)
 	{
@@ -389,8 +386,7 @@ private:
 		mallaBadajo = superficieRevolucion(perfil, 16);
 	}
 
-	// ---------------- Sonido ----------------
-
+	// Sonido
 	// Suma de parciales de campana con decaimiento exponencial
 	void crearSonido()
 	{

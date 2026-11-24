@@ -1,6 +1,4 @@
-# iglesia.mtl - corregido para OpenGL
-# Un material por objeto. Las texturas van en la carpeta maps/ junto al .obj
-# Si tu imagen se llama distinto, cambia SOLO el nombre en la linea map_Kd
+# Materiales de la iglesia
 
 newmtl mat_muros
 	Ns 10.0000

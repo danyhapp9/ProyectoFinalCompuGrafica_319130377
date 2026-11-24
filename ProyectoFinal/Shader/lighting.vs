@@ -1,11 +1,7 @@
 #version 330 core
-// =============================================================
-//  lighting.vs  (Equipo 1 - Día de Muertos)
-//  Para todos los modelos funciona igual que antes (ondula = 0).
-//  Con ondula = 1 deforma la malla del papel picado:
-//  onda viajera + aleteo fino + balanceo tipo péndulo,
-//  con el borde superior (el doblez del cordón) fijo.
-// =============================================================
+// Vertex shader de iluminación
+// Con ondula = 1 se deforma el papel picado: onda viajera,
+// aleteo y balanceo tipo péndulo (el borde superior queda fijo)
 layout (location = 0) in vec3 position;
 layout (location = 1) in vec3 normal;
 layout (location = 2) in vec2 texCoords;

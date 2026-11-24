@@ -7,12 +7,12 @@ in vec3 vPosMundo;
 out vec4 FragColor;
 
 uniform vec3 colorHumo;
-// Misma niebla que lighting.frag para que el humo se pierda igual que el resto de la escena
+// Niebla (igual que en lighting.frag)
 uniform vec3 colorNiebla;
 uniform float densidadNiebla;
 uniform vec3 viewPos;
 
-// Ruido procedural para que cada bocanada tenga forma irregular (sin textura)
+// Ruido procedural
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 
 float ruido(vec2 p)

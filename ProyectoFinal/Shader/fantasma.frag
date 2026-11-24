@@ -21,10 +21,10 @@ void main()
     if (tex.a < 0.1)
         discard;
 
-    // Brillo de la textura original, pero teñido de un solo color
+    // Textura teñida de un solo color
     float lum = dot(tex.rgb, vec3(0.299, 0.587, 0.114));
 
-    // Fresnel: los bordes brillan más que el centro (se ve etéreo)
+    // Fresnel: bordes más brillantes
     vec3 N = normalize(Normal);
     vec3 V = normalize(viewPos - FragPos);
     float fres = pow(1.0 - abs(dot(N, V)), 2.0);
@@ -39,7 +39,7 @@ void main()
 
     float alpha = alphaFantasma * (0.35 + 0.45 * fres) * (0.8 + 0.2 * onda) * parpadeo;
 
-    // Niebla (para que se pierda con la distancia igual que el resto de la escena)
+    // Niebla
     float d = length(viewPos - FragPos);
     float f = clamp(exp(-pow(d * densidadNiebla, 2.0)), 0.0, 1.0);
     alpha *= f;
