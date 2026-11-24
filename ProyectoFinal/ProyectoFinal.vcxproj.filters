@@ -78,5 +78,11 @@
     <None Include="Shader\skybox.vs">
       <Filter>Archivos de origen\Shader</Filter>
     </None>
+    <None Include="Shader\fantasma.frag">
+      <Filter>Archivos de origen\Shader</Filter>
+    </None>
+    <None Include="Shader\humo.frag">
+      <Filter>Archivos de origen\Shader</Filter>
+    </None>
   </ItemGroup>
 </Project>

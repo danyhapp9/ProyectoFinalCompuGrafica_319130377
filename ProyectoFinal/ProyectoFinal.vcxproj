@@ -35,6 +35,8 @@
   <ItemGroup>
     <None Include="Shader\core.frag" />
     <None Include="Shader\core.vs" />
+    <None Include="Shader\fantasma.frag" />
+    <None Include="Shader\humo.frag" />
     <None Include="Shader\lamp.frag" />
     <None Include="Shader\lamp.vs" />
     <None Include="Shader\lighting.frag" />
